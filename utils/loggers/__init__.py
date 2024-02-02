@@ -68,21 +68,51 @@ class Loggers():
         self.plots = not opt.noplots  # plot results
         self.logger = logger  # for printing results to console
         self.include = include
-        self.keys = [
+        # self.keys = [
+        #     'train/box_loss',
+        #     'train/obj_loss',
+        #     'train/cls_loss',  # train loss
+        #     'metrics/precision',
+        #     'metrics/recall',
+        #     'metrics/mAP_0.5',
+        #     'metrics/mAP_0.5:0.95',  # metrics
+        #     'val/box_loss',
+        #     'val/obj_loss',
+        #     'val/cls_loss',  # val loss
+        #     'x/lr0',
+        #     'x/lr1',
+        #     'x/lr2']  # params
+        self.keys=[
             'train/box_loss',
+            'train/seg_loss',  # train loss
             'train/obj_loss',
-            'train/cls_loss',  # train loss
-            'metrics/precision',
-            'metrics/recall',
-            'metrics/mAP_0.5',
-            'metrics/mAP_0.5:0.95',  # metrics
+            'train/cls_loss',
+            'metrics/precision(B)',
+            'metrics/recall(B)',
+            'metrics/mAP_0.5(B)',
+            'metrics/mAP_0.5:0.95(B)',  # metrics
+            'metrics/precision(M)',
+            'metrics/recall(M)',
+            'metrics/mAP_0.5(M)',
+            'metrics/mAP_0.5:0.95(M)',  # metrics
             'val/box_loss',
+            'val/seg_loss',  # val loss
             'val/obj_loss',
-            'val/cls_loss',  # val loss
+            'val/cls_loss',
             'x/lr0',
             'x/lr1',
-            'x/lr2']  # params
-        self.best_keys = ['best/epoch', 'best/precision', 'best/recall', 'best/mAP_0.5', 'best/mAP_0.5:0.95']
+            'x/lr2', ]
+        # self.best_keys = ['best/epoch', 'best/precision', 'best/recall', 'best/mAP_0.5', 'best/mAP_0.5:0.95']
+        self.best_keys=[
+            'best/epoch',
+            'best/precision(B)',
+            'best/recall(B)',
+            'best/mAP_0.5(B)',
+            'best/mAP_0.5:0.95(B)',
+            'best/precision(M)',
+            'best/recall(M)',
+            'best/mAP_0.5(M)',
+            'best/mAP_0.5:0.95(M)', ]
         for k in LOGGERS:
             setattr(self, k, None)  # init empty logger dictionary
         self.csv = True  # always log to csv
@@ -221,13 +251,32 @@ class Loggers():
 
     def on_fit_epoch_end(self, vals, epoch, best_fitness, fi):
         # Callback runs at the end of each fit (train+val) epoch
-        x = dict(zip(self.keys, vals))
-        if self.csv:
-            file = self.save_dir / 'results.csv'
-            n = len(x) + 1  # number of cols
-            s = '' if file.exists() else (('%20s,' * n % tuple(['epoch'] + self.keys)).rstrip(',') + '\n')  # add header
-            with open(file, 'a') as f:
-                f.write(s + ('%20.5g,' * n % tuple([epoch] + vals)).rstrip(',') + '\n')
+        # x = dict(zip(self.keys, vals))
+        # if self.csv:
+        #     file = self.save_dir / 'results.csv'
+        #     n = len(x) + 1  # number of cols
+        #     s = '' if file.exists() else (('%20s,' * n % tuple(['epoch'] + self.keys)).rstrip(',') + '\n')  # add header
+        #     with open(file, 'a') as f:
+        #         f.write(s + ('%20.5g,' * n % tuple([epoch] + vals)).rstrip(',') + '\n')
+        
+        import traceback
+        try:
+            # Callback runs at the end of each fit (train+val) epoch
+            x = dict(zip(self.keys, vals))
+            if self.csv:
+                file = self.save_dir / 'results.csv'
+                n = len(x)+1
+                s = '' if file.exists() else (('%20s,' * n % tuple(['epoch'] + self.keys)).rstrip(',') + '\n')  # add header
+                with open(file, 'a') as f:
+                    f.write(s + ('%20.5g,' * n % tuple([epoch] + vals)).rstrip(',') + '\n')
+        except Exception as e:
+            print("An error occurred:", str(e))
+            print(x)
+            print(n)
+            print(vals)
+            print(self.keys)
+            traceback.print_exc()
+        
 
         if self.tb:
             for k, v in x.items():

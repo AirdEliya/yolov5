@@ -50,7 +50,8 @@ from utils.downloads import attempt_download, is_url
 from utils.general import (LOGGER, TQDM_BAR_FORMAT, check_amp, check_dataset, check_file, check_git_info,
                            check_git_status, check_img_size, check_requirements, check_suffix, check_yaml, colorstr,
                            get_latest_run, increment_path, init_seeds, intersect_dicts, labels_to_class_weights,
-                           labels_to_image_weights, one_cycle, print_args, print_mutation, strip_optimizer, yaml_save)
+                           labels_to_image_weights, one_cycle, print_args, print_mutation, strip_optimizer, yaml_save,methods)
+# methods是我這邊加上去的
 from utils.loggers import GenericLogger
 from utils.plots import plot_evolve, plot_labels
 from utils.segment.dataloaders import create_dataloader
@@ -59,6 +60,8 @@ from utils.segment.metrics import KEYS, fitness
 from utils.segment.plots import plot_images_and_masks, plot_results_with_masks
 from utils.torch_utils import (EarlyStopping, ModelEMA, de_parallel, select_device, smart_DDP, smart_optimizer,
                                smart_resume, torch_distributed_zero_first)
+# 我嘗試把train的方法移動試試看
+from utils.loggers import Loggers
 
 LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # https://pytorch.org/docs/stable/elastic/run.html
 RANK = int(os.getenv('RANK', -1))
@@ -92,7 +95,16 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     # Loggers
     data_dict = None
     if RANK in {-1, 0}:
-        logger = GenericLogger(opt=opt, console_logger=LOGGER)
+        # logger = GenericLogger(opt=opt, console_logger=LOGGER)
+        logger=Loggers(save_dir, weights, opt, hyp, LOGGER)
+        # Register actions
+        for k in methods(logger):
+            callbacks.register_action(k, callback=getattr(logger, k))
+        
+        # Process custom dataset artifact link
+        data_dict = logger.remote_dataset
+        if resume:  # If resuming runs from remote artifact
+            weights, epochs, hyp, batch_size = opt.weights, opt.epochs, opt.hyp, opt.batch_size
 
     # Config
     plots = not evolve and not opt.noplots  # create plots
@@ -139,8 +151,10 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     # Batch size
     if RANK == -1 and batch_size == -1:  # single-GPU only, estimate best batch size
         batch_size = check_train_batch_size(model, imgsz, amp)
-        logger.update_params({'batch_size': batch_size})
-        # loggers.on_params_update({"batch_size": batch_size})
+
+        # 這邊我將兩者的對調
+        # logger.update_params({'batch_size': batch_size})
+        logger.on_params_update({"batch_size": batch_size})
 
     # Optimizer
     nbs = 64  # nominal batch size
@@ -340,13 +354,13 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                 # if callbacks.stop_training:
                 #    return
 
-                # Mosaic plots
-                if plots:
-                    if ni < 3:
-                        plot_images_and_masks(imgs, targets, masks, paths, save_dir / f'train_batch{ni}.jpg')
-                    if ni == 10:
-                        files = sorted(save_dir.glob('train*.jpg'))
-                        logger.log_images(files, 'Mosaics', epoch)
+                # Mosaic plots 因為Logger並沒有定義相關東西，先不要去畫他
+                # if plots:
+                #     if ni < 3:
+                #         plot_images_and_masks(imgs, targets, masks, paths, save_dir / f'train_batch{ni}.jpg')
+                #     if ni == 10:
+                #         files = sorted(save_dir.glob('train*.jpg'))
+                #         logger.log_images(files, 'Mosaics', epoch)
             # end batch ------------------------------------------------------------------------------------------------
 
         # Scheduler
@@ -379,10 +393,12 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
             if fi > best_fitness:
                 best_fitness = fi
             log_vals = list(mloss) + list(results) + lr
-            # callbacks.run('on_fit_epoch_end', log_vals, epoch, best_fitness, fi)
+
+            callbacks.run('on_fit_epoch_end', log_vals, epoch, best_fitness, fi)
+
             # Log val metrics and media
-            metrics_dict = dict(zip(KEYS, log_vals))
-            logger.log_metrics(metrics_dict, epoch)
+            # metrics_dict = dict(zip(KEYS, log_vals))
+            # logger.log_metrics(metrics_dict, epoch)
 
             # Save model
             if (not nosave) or (final_epoch and not evolve):  # if save
@@ -403,9 +419,9 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                     torch.save(ckpt, best)
                 if opt.save_period > 0 and epoch % opt.save_period == 0:
                     torch.save(ckpt, w / f'epoch{epoch}.pt')
-                    logger.log_model(w / f'epoch{epoch}.pt')
+                    # logger.log_model(w / f'epoch{epoch}.pt')   這個也是Generic才有的東西
                 del ckpt
-                # callbacks.run('on_model_save', last, epoch, final_epoch, best_fitness, fi)
+                callbacks.run('on_model_save', last, epoch, final_epoch, best_fitness, fi)#原本是註解這行
 
         # EarlyStopping
         if RANK != -1:  # if DDP training
@@ -442,22 +458,24 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
                         mask_downsample_ratio=mask_ratio,
                         overlap=overlap)  # val best model with plots
                     if is_coco:
-                        # callbacks.run('on_fit_epoch_end', list(mloss) + list(results) + lr, epoch, best_fitness, fi)
-                        metrics_dict = dict(zip(KEYS, list(mloss) + list(results) + lr))
-                        logger.log_metrics(metrics_dict, epoch)
+                        callbacks.run('on_fit_epoch_end', list(mloss) + list(results) + lr, epoch, best_fitness, fi)#原本有註解
 
-        # callbacks.run('on_train_end', last, best, epoch, results)
+                        # 對應Logger方法註解下兩行
+                        # metrics_dict = dict(zip(KEYS, list(mloss) + list(results) + lr))
+                        # logger.log_metrics(metrics_dict, epoch)
+
+        callbacks.run('on_train_end', last, best, epoch, results)#原本有註解
         # on train end callback using genericLogger
-        logger.log_metrics(dict(zip(KEYS[4:16], results)), epochs)
-        if not opt.evolve:
-            logger.log_model(best, epoch)
-        if plots:
-            plot_results_with_masks(file=save_dir / 'results.csv')  # save results.png
-            files = ['results.png', 'confusion_matrix.png', *(f'{x}_curve.png' for x in ('F1', 'PR', 'P', 'R'))]
-            files = [(save_dir / f) for f in files if (save_dir / f).exists()]  # filter
-            LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}")
-            logger.log_images(files, 'Results', epoch + 1)
-            logger.log_images(sorted(save_dir.glob('val*.jpg')), 'Validation', epoch + 1)
+        # logger.log_metrics(dict(zip(KEYS[4:16], results)), epochs)
+        # if not opt.evolve:
+        #     logger.log_model(best, epoch)
+        # if plots:
+        #     plot_results_with_masks(file=save_dir / 'results.csv')  # save results.png
+        #     files = ['results.png', 'confusion_matrix.png', *(f'{x}_curve.png' for x in ('F1', 'PR', 'P', 'R'))]
+        #     files = [(save_dir / f) for f in files if (save_dir / f).exists()]  # filter
+        #     LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}")
+        #     logger.log_images(files, 'Results', epoch + 1)
+        #     logger.log_images(sorted(save_dir.glob('val*.jpg')), 'Validation', epoch + 1)
     torch.cuda.empty_cache()
     return results
 
@@ -502,6 +520,12 @@ def parse_opt(known=False):
     # Instance Segmentation Args
     parser.add_argument('--mask-ratio', type=int, default=4, help='Downsample the truth masks to saving memory')
     parser.add_argument('--no-overlap', action='store_true', help='Overlap masks train faster at slightly less mAP')
+
+    # Default 有些要先輸入的默認數值
+    parser.add_argument('--entity', default=None, help='Entity')
+    parser.add_argument('--upload_dataset', nargs='?', const=True, default=False, help='Upload data, "val" option')
+    parser.add_argument('--bbox_interval', type=int, default=-1, help='Set bounding-box image logging interval')
+    parser.add_argument('--artifact_alias', type=str, default='latest', help='Version of dataset artifact to use')
 
     return parser.parse_known_args()[0] if known else parser.parse_args()
 
