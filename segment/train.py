@@ -52,7 +52,7 @@ from utils.general import (LOGGER, TQDM_BAR_FORMAT, check_amp, check_dataset, ch
                            get_latest_run, increment_path, init_seeds, intersect_dicts, labels_to_class_weights,
                            labels_to_image_weights, one_cycle, print_args, print_mutation, strip_optimizer, yaml_save,methods)
 # methods是我這邊加上去的
-from utils.loggers import GenericLogger
+from utils.loggers import GenericLogger,Loggers_segment_modify
 from utils.plots import plot_evolve, plot_labels
 from utils.segment.dataloaders import create_dataloader
 from utils.segment.loss import ComputeLoss
@@ -96,7 +96,7 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
     data_dict = None
     if RANK in {-1, 0}:
         # logger = GenericLogger(opt=opt, console_logger=LOGGER)
-        logger=Loggers(save_dir, weights, opt, hyp, LOGGER)
+        logger=Loggers_segment_modify(save_dir, weights, opt, hyp, LOGGER)
         # Register actions
         for k in methods(logger):
             callbacks.register_action(k, callback=getattr(logger, k))
